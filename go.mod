@@ -1,4 +1,4 @@
-module wg-punch-kernel
+module github.com/yago-123/wg-punch-kernel
 
 go 1.24.2
 
@@ -14,10 +14,6 @@ require (
 	github.com/mdlayher/genetlink v1.3.2 // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
-	github.com/pion/dtls/v2 v2.2.7 // indirect
-	github.com/pion/logging v0.2.2 // indirect
-	github.com/pion/stun v0.6.1 // indirect
-	github.com/pion/transport/v2 v2.2.1 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
