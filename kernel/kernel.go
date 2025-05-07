@@ -3,7 +3,7 @@ package kernel
 import (
 	"context"
 	"fmt"
-	"log"
+	"github.com/go-logr/logr"
 	"net"
 	"strings"
 	"time"
@@ -12,6 +12,7 @@ import (
 	"github.com/yago-123/wg-punch/pkg/peer"
 	"github.com/yago-123/wg-punch/pkg/tunnel"
 	tunnelUtil "github.com/yago-123/wg-punch/pkg/tunnel/util"
+	util "github.com/yago-123/wg-punch/pkg/util"
 
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -20,27 +21,28 @@ import (
 const (
 	WireGuardLinkType   = "wireguard"
 	HandshakeTriggerMsg = "hello wg"
-	UDPProtocol         = "udp"
 )
 
 type kernelWGTunnel struct {
 	listener *net.UDPConn
 	privKey  wgtypes.Key
-	config   *tunnel.Config
+
+	config *tunnel.Config
+	logger logr.Logger
 }
 
-func NewTunnel(cfg *tunnel.Config) (tunnel.Tunnel, error) {
+func NewTunnel(cfg *tunnel.Config, logger logr.Logger) (tunnel.Tunnel, error) {
 	// todo(): validate config
 
 	privKey, err := wgtypes.ParseKey(cfg.PrivKey)
 	if err != nil {
-		log.Fatalf("failed to parse private key: %v", err)
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 
 	return &kernelWGTunnel{
 		privKey: privKey,
 		config:  cfg,
+		logger:  logger,
 	}, nil
 }
 
@@ -70,7 +72,7 @@ func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remote
 		},
 	}
 
-	log.Printf("configuring WireGuard device %s with config: %+v", kwgt.config.Iface, cfg)
+	kwgt.logger.Info("configuring WireGuard device", "iface", kwgt.config.Iface)
 
 	if err = kwgt.ensureInterfaceExists(kwgt.config.Iface); err != nil {
 		return fmt.Errorf("failed to ensure interface exists: %w", err)
@@ -84,7 +86,11 @@ func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remote
 		return fmt.Errorf("failed to add remotePeer routes: %w", err)
 	}
 
-	// todo(): this check should go away
+	// Cancel the punching process so that it doesn't interfere with the connection
+	cancelPunch()
+
+	// Release the UDP connection so that WireGuard can take over. Check if nil just in case, by default the conn passed
+	// should be a valid one
 	if conn != nil {
 		// Stop UDP connection so that WireGuard can take over
 		if errConnUDP := conn.Close(); errConnUDP != nil {
@@ -92,16 +98,14 @@ func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remote
 		}
 	}
 
-	time.Sleep(200 * time.Millisecond)
-
 	if errDevice := client.ConfigureDevice(kwgt.config.Iface, cfg); errDevice != nil {
 		return fmt.Errorf("failed to configure device: %w", errDevice)
 	}
 
-	ctxInit, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctxHandshake, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	go kwgt.startHandshakeTriggerLoop(ctxInit, remotePeer.Endpoint, 1*time.Second)
+	go kwgt.startHandshakeTriggerLoop(ctxHandshake, remotePeer.Endpoint, 1*time.Second)
 
 	if errHandshake := kwgt.waitForHandshake(ctx, client, remotePubKey); errHandshake != nil {
 		return fmt.Errorf("failed to wait for handshake: %w", errHandshake)
@@ -209,6 +213,16 @@ func (kwgt *kernelWGTunnel) waitForHandshake(ctx context.Context, wgClient *wgct
 	}
 }
 
+// hasHandshake checks if the peer has a handshake with the given public key
+func hasHandshake(device *wgtypes.Device, remotePubKey wgtypes.Key) bool {
+	for _, peer := range device.Peers {
+		if peer.PublicKey == remotePubKey && !peer.LastHandshakeTime.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
 // todo(): remove
 func (kwgt *kernelWGTunnel) startHandshakeTriggerLoop(ctx context.Context, endpoint *net.UDPAddr, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -219,7 +233,7 @@ func (kwgt *kernelWGTunnel) startHandshakeTriggerLoop(ctx context.Context, endpo
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			conn, err := net.DialUDP(UDPProtocol, nil, endpoint)
+			conn, err := net.DialUDP(util.UDPProtocol, nil, endpoint)
 			if err != nil {
 				// log.Printf("Error dialing UDP: %v", err)
 				continue
@@ -234,14 +248,4 @@ func (kwgt *kernelWGTunnel) startHandshakeTriggerLoop(ctx context.Context, endpo
 			}
 		}
 	}
-}
-
-// hasHandshake checks if the peer has a handshake with the given public key
-func hasHandshake(device *wgtypes.Device, remotePubKey wgtypes.Key) bool {
-	for _, peer := range device.Peers {
-		if peer.PublicKey == remotePubKey && !peer.LastHandshakeTime.IsZero() {
-			return true
-		}
-	}
-	return false
 }
