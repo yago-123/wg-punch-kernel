@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/vishvananda/netlink"
 	"github.com/yago-123/wg-punch/pkg/peer"
-	"github.com/yago-123/wg-punch/pkg/wg"
+	"github.com/yago-123/wg-punch/pkg/tunnel"
+	tunnelUtil "github.com/yago-123/wg-punch/pkg/tunnel/util"
+
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -25,10 +26,10 @@ const (
 type kernelWGTunnel struct {
 	listener *net.UDPConn
 	privKey  wgtypes.Key
-	config   *wg.TunnelConfig
+	config   *tunnel.Config
 }
 
-func NewTunnel(cfg *wg.TunnelConfig) (wg.Tunnel, error) {
+func NewTunnel(cfg *tunnel.Config) (tunnel.Tunnel, error) {
 	// todo(): validate config
 
 	privKey, err := wgtypes.ParseKey(cfg.PrivKey)
@@ -43,7 +44,7 @@ func NewTunnel(cfg *wg.TunnelConfig) (wg.Tunnel, error) {
 	}, nil
 }
 
-func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remotePeer peer.Info) error {
+func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remotePeer peer.Info, cancelPunch context.CancelFunc) error {
 	client, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("failed to open wgctrl rendclient: %w", err)
@@ -75,11 +76,11 @@ func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remote
 		return fmt.Errorf("failed to ensure interface exists: %w", err)
 	}
 
-	if err = kwgt.assignAddressToIface(kwgt.config.Iface, kwgt.config.IfaceIPv4CIDR); err != nil {
+	if err = tunnelUtil.AssignAddressToIface(kwgt.config.Iface, kwgt.config.IfaceIPv4CIDR); err != nil {
 		return fmt.Errorf("failed to assign address to interface: %w", err)
 	}
 
-	if err = kwgt.addPeerRoutes(kwgt.config.Iface, remotePeer.AllowedIPs); err != nil {
+	if err = tunnelUtil.AddPeerRoutes(kwgt.config.Iface, remotePeer.AllowedIPs); err != nil {
 		return fmt.Errorf("failed to add remotePeer routes: %w", err)
 	}
 
@@ -118,7 +119,7 @@ func (kwgt *kernelWGTunnel) PublicKey() string {
 	return kwgt.privKey.PublicKey().String()
 }
 
-func (kwgt *kernelWGTunnel) Stop() error {
+func (kwgt *kernelWGTunnel) Stop(ctx context.Context) error {
 	client, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("failed to open wgctrl rendclient: %w", err)
@@ -177,64 +178,6 @@ func (kwgt *kernelWGTunnel) ensureInterfaceExists(iface string) error {
 	// Bring the interface up
 	if err = netlink.LinkSetUp(link); err != nil {
 		return fmt.Errorf("failed to bring up interface %q: %w", iface, err)
-	}
-
-	return nil
-}
-
-// assignAddressToIface assigns the internal IP address to the WireGuard interface in CIDR notation in order to allow
-// communications between peers
-func (kwgt *kernelWGTunnel) assignAddressToIface(iface, addrCIDR string) error {
-	// Lookup interface link by name
-	link, err := netlink.LinkByName(iface)
-	if err != nil {
-		return fmt.Errorf("failed to get link %s: %w", iface, err)
-	}
-
-	// Parse address CIDR to assign to the interface
-	addr, err := netlink.ParseAddr(addrCIDR)
-	if err != nil {
-		return fmt.Errorf("failed to parse address %s: %w", addrCIDR, err)
-	}
-
-	// todo(): move this into a separate function
-	// Check if the address already exists on the interface
-	existingAddrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
-	if err != nil {
-		return fmt.Errorf("failed to list addresses on %s: %w", iface, err)
-	}
-
-	for _, a := range existingAddrs {
-		if a.IP.Equal(addr.IP) && a.Mask.String() == addr.Mask.String() {
-			return nil // already exists, don't reassign
-		}
-	}
-
-	// Assign address to the interface
-	if errAddr := netlink.AddrAdd(link, addr); errAddr != nil {
-		return fmt.Errorf("failed to assign address: %w", errAddr)
-	}
-
-	return nil
-}
-
-// addPeerRoutes adds the allowed IPs of the peer to the WireGuard interface so that the kernel can route packets
-func (kwgt *kernelWGTunnel) addPeerRoutes(iface string, allowedIPs []net.IPNet) error {
-	link, err := netlink.LinkByName(iface)
-	if err != nil {
-		return fmt.Errorf("failed to get link %q: %w", iface, err)
-	}
-
-	for _, ipNet := range allowedIPs {
-		route := &netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Dst:       &ipNet,
-		}
-
-		// Try to add the route, but don't fail if it already exists
-		if errRoute := netlink.RouteAdd(route); errRoute != nil && !os.IsExist(errRoute) {
-			return fmt.Errorf("failed to add route %s: %w", ipNet.String(), errRoute)
-		}
 	}
 
 	return nil
