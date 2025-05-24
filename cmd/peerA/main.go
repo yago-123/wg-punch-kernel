@@ -20,13 +20,12 @@ import (
 const (
 	TCPServerPort = 8080
 	TCPClientPort = 8080
-	TCPMaxBuffer  = 1024
 
 	TunnelHandshakeTimeout = 30 * time.Second
 	RendezvousServer       = "http://rendezvous.yago.ninja:7777"
 
-	LocalPeerID  = "xccccc1"
-	RemotePeerID = "xccccc2"
+	LocalPeerID  = "peer-1"
+	RemotePeerID = "peer-2"
 
 	WGLocalListenPort    = 51821
 	WGLocalIfaceName     = "wg1"
@@ -38,9 +37,9 @@ const (
 
 	WGLocalPrivKey = "APSapiXBpAH1vTAh4EIvSYxhsE9O1YYVcZJngjvNbVs="
 
-	WGKeepAliveInterval = 5 * time.Second
-
-	DelayClientStart = 5 * time.Second
+	WGKeepAliveInterval   = 5 * time.Second
+	PuncherPacketInterval = 300 * time.Millisecond
+	DelayClientStart      = 5 * time.Second
 )
 
 var stunServers = []string{
@@ -59,7 +58,7 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	puncherOptions := []puncher.Option{
-		puncher.WithPuncherInterval(300 * time.Millisecond),
+		puncher.WithPuncherInterval(PuncherPacketInterval),
 		puncher.WithSTUNServers(stunServers),
 		puncher.WithLogger(logger),
 	}
@@ -96,7 +95,7 @@ func main() {
 
 	// the tunnel is started inside the Connect method, but can't be stopped by this method because the lifecycle
 	// must live outside of the Connect method. The tunnel stop responsibility must be handled manually
-	defer tunnel.Stop(context.Background())
+	defer ignoreErr(tunnel.Stop(context.Background()))
 
 	// Connect to peer using a shared peer ID (both sides use same ID)
 	netConn, err := conn.Connect(ctxHandshake, tunnel, []string{WGLocalIfaceAddrCIDR}, RemotePeerID)
@@ -133,10 +132,12 @@ func main() {
 	go func() {
 		for {
 			tcpClient.Send("hello via TCP over WireGuard")
-			time.Sleep(3 * time.Second)
+			time.Sleep(3 * time.Second) //nolint:mnd // OK to use a fixed interval for testing
 		}
 	}()
 
 	// Block until Ctrl+C signal is received
 	<-sigCh
 }
+
+func ignoreErr(_ any) {}

@@ -36,8 +36,6 @@ type kernelWGTunnel struct {
 }
 
 func NewTunnel(cfg *tunnel.Config, logger logr.Logger) (tunnel.Tunnel, error) {
-	// todo(): validate config
-
 	privKey, err := wgtypes.ParseKey(cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
@@ -112,13 +110,10 @@ func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remote
 	ctxHandshakeTrigger, cancelHandshakeTrigger := context.WithCancel(ctx)
 	defer cancelHandshakeTrigger()
 
-	kwgt.logger.Info("starting handshake trigger")
-
+	kwgt.logger.V(1).Info("starting handshake trigger", "endpoint", remotePeer.Endpoint.String())
 	go kwgt.startHandshakeTriggerLoop(ctxHandshakeTrigger, remotePeer.Endpoint, HandshakeTriggerLoopInterval)
 
-	kwgt.logger.Info("waiting for handshake")
-
-	// todo(): pass cancelHandshakeTrigger to the loop once we verified is really 100% needed
+	kwgt.logger.V(1).Info("waiting for handshake to be stablished", "endpoint", remotePeer.Endpoint.String())
 	if errHandshake := kwgt.waitForHandshake(ctx, client, remotePubKey, HandshakeCheckInterval); errHandshake != nil {
 		return fmt.Errorf("failed to wait for handshake: %w", errHandshake)
 	}
@@ -234,7 +229,13 @@ func hasHandshake(device *wgtypes.Device, remotePubKey wgtypes.Key) bool {
 	return false
 }
 
-// todo(): remove
+// startHandshakeTriggerLoop periodically sends a dummy UDP packet to the remote peer's endpoint.
+// This is used to trigger the initial WireGuard handshake in scenarios where:
+// - Both peers are behind NATs and no traffic has yet been exchanged
+// - PersistentKeepalive alone is not sufficient to open the NAT bindings in time
+//
+// This loop helps with NAT hole punching by ensuring at least one packet reaches the remote peer,
+// allowing WireGuard's kernel module to learn the correct endpoint and initiate a handshake
 func (kwgt *kernelWGTunnel) startHandshakeTriggerLoop(ctx context.Context, endpoint *net.UDPAddr, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
