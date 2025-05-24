@@ -3,10 +3,11 @@ package kernel
 import (
 	"context"
 	"fmt"
-	"github.com/go-logr/logr"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/go-logr/logr"
 
 	"github.com/vishvananda/netlink"
 	"github.com/yago-123/wg-punch/pkg/peer"
@@ -21,6 +22,9 @@ import (
 const (
 	WireGuardLinkType   = "wireguard"
 	HandshakeTriggerMsg = "hello wg"
+
+	HandshakeTriggerLoopInterval = 300 * time.Millisecond
+	HandshakeCheckInterval       = 500 * time.Second
 )
 
 type kernelWGTunnel struct {
@@ -102,12 +106,20 @@ func (kwgt *kernelWGTunnel) Start(ctx context.Context, conn *net.UDPConn, remote
 		return fmt.Errorf("failed to configure device: %w", errDevice)
 	}
 
-	ctxHandshake, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
+	// In order to ensure that the handshake is triggered, we start a loop that sends a message to the remote peer
+	// at regular intervals. This is necessary because the WireGuard kernel module does not automatically trigger
+	// handshakes. Once the handshake has been established, it must be canceled
+	ctxHandshakeTrigger, cancelHandshakeTrigger := context.WithCancel(ctx)
+	defer cancelHandshakeTrigger()
 
-	go kwgt.startHandshakeTriggerLoop(ctxHandshake, remotePeer.Endpoint, 1*time.Second)
+	kwgt.logger.Info("starting handshake trigger")
 
-	if errHandshake := kwgt.waitForHandshake(ctx, client, remotePubKey); errHandshake != nil {
+	go kwgt.startHandshakeTriggerLoop(ctxHandshakeTrigger, remotePeer.Endpoint, HandshakeTriggerLoopInterval)
+
+	kwgt.logger.Info("waiting for handshake")
+
+	// todo(): pass cancelHandshakeTrigger to the loop once we verified is really 100% needed
+	if errHandshake := kwgt.waitForHandshake(ctx, client, remotePubKey, HandshakeCheckInterval); errHandshake != nil {
 		return fmt.Errorf("failed to wait for handshake: %w", errHandshake)
 	}
 
@@ -123,7 +135,7 @@ func (kwgt *kernelWGTunnel) PublicKey() string {
 	return kwgt.privKey.PublicKey().String()
 }
 
-func (kwgt *kernelWGTunnel) Stop(ctx context.Context) error {
+func (kwgt *kernelWGTunnel) Stop(_ context.Context) error {
 	client, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("failed to open wgctrl rendclient: %w", err)
@@ -138,7 +150,7 @@ func (kwgt *kernelWGTunnel) Stop(ctx context.Context) error {
 		return fmt.Errorf("failed to clear WireGuard config: %w", errConf)
 	}
 
-	// Then delete the interface
+	// Delete the interface
 	link, err := netlink.LinkByName(kwgt.config.Iface)
 	if err != nil {
 		return fmt.Errorf("failed to get link %s: %w", kwgt.config.Iface, err)
@@ -188,9 +200,8 @@ func (kwgt *kernelWGTunnel) ensureInterfaceExists(iface string) error {
 }
 
 // waitForHandshake waits for the handshake with the remote peer to be established
-func (kwgt *kernelWGTunnel) waitForHandshake(ctx context.Context, wgClient *wgctrl.Client, remotePubKey wgtypes.Key) error {
-	// todo(): make ticker configurable
-	ticker := time.NewTicker(500 * time.Millisecond)
+func (kwgt *kernelWGTunnel) waitForHandshake(ctx context.Context, wgClient *wgctrl.Client, remotePubKey wgtypes.Key, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -235,16 +246,14 @@ func (kwgt *kernelWGTunnel) startHandshakeTriggerLoop(ctx context.Context, endpo
 		case <-ticker.C:
 			conn, err := net.DialUDP(util.UDPProtocol, nil, endpoint)
 			if err != nil {
-				// log.Printf("Error dialing UDP: %v", err)
+				kwgt.logger.Error(err, "Error dialing UDP", "endpoint", endpoint.String())
 				continue
 			}
 
 			_, err = conn.Write([]byte(HandshakeTriggerMsg))
 			conn.Close()
-
 			if err != nil {
-				// kwgt
-				// log.Printf("Error sending handshake to %s: %v", endpoint.String(), err)
+				kwgt.logger.Error(err, "Error writing handshake message", "endpoint", endpoint.String())
 			}
 		}
 	}

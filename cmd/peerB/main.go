@@ -8,11 +8,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yago-123/wg-punch/pkg/tunnel"
+
 	kernelwg "github.com/yago-123/wg-punch-kernel/kernel"
 	"github.com/yago-123/wg-punch/cmd/common"
 	"github.com/yago-123/wg-punch/pkg/connect"
 	"github.com/yago-123/wg-punch/pkg/puncher"
-	"github.com/yago-123/wg-punch/pkg/wg"
 
 	"github.com/go-logr/logr"
 )
@@ -25,8 +26,8 @@ const (
 	TunnelHandshakeTimeout = 30 * time.Second
 	RendezvousServer       = "http://rendezvous.yago.ninja:7777"
 
-	LocalPeerID  = "kk2"
-	RemotePeerID = "kk1"
+	LocalPeerID  = "xc2"
+	RemotePeerID = "xc1"
 
 	WGLocalListenPort    = 51822
 	WGLocalIfaceName     = "wg2"
@@ -36,8 +37,7 @@ const (
 	// todo(): this should go away
 	RemotePeerIP = "10.1.1.1"
 
-	WGLocalPrivKey = "SEK/qGXalmKu3yPhkvZThcc8aQxordG5RkUz0/4jcFE="
-
+	WGLocalPrivKey      = "SEK/qGXalmKu3yPhkvZThcc8aQxordG5RkUz0/4jcFE="
 	WGKeepAliveInterval = 5 * time.Second
 
 	DelayClientStart = 5 * time.Second
@@ -77,7 +77,7 @@ func main() {
 	ctxHandshake, cancel := context.WithTimeout(context.Background(), TunnelHandshakeTimeout)
 	defer cancel()
 
-	tunnelCfg := &wg.TunnelConfig{
+	tunnelCfg := &tunnel.Config{
 		PrivKey:           WGLocalPrivKey,
 		Iface:             WGLocalIfaceName,
 		IfaceIPv4CIDR:     WGLocalIfaceAddrCIDR,
@@ -88,11 +88,15 @@ func main() {
 	}
 
 	// Initialize WireGuard interface using WireGuard
-	tunnel, err := kernelwg.NewTunnel(tunnelCfg)
+	tunnel, err := kernelwg.NewTunnel(tunnelCfg, logger)
 	if err != nil {
 		logger.Error(err, "failed to create tunnel", "localPeer", LocalPeerID)
 		return
 	}
+
+	// the tunnel is started inside the Connect method, but can't be stopped by this method because the lifecycle
+	// must live outside of the Connect method. The tunnel stop responsibility must be handled manually
+	defer tunnel.Stop(context.Background())
 
 	// Connect to peer using a shared peer ID (both sides use same ID)
 	netConn, err := conn.Connect(ctxHandshake, tunnel, []string{WGLocalIfaceAddrCIDR}, RemotePeerID)
@@ -101,8 +105,6 @@ func main() {
 		return
 	}
 
-	// todo(): think about where to put the cancel of the tunnel itself
-	defer tunnel.Stop()
 	defer netConn.Close()
 
 	logger.Info("Tunnel has been stablished! Press Ctrl+C to exit.")
@@ -117,7 +119,6 @@ func main() {
 	tcpServer.Start()
 	defer tcpServer.Close()
 
-	// todo(): move to HTTP server
 	// Start TCP client after a delay to ensure server is ready
 	time.Sleep(DelayClientStart)
 
@@ -132,7 +133,7 @@ func main() {
 	go func() {
 		for {
 			tcpClient.Send("hello via TCP over WireGuard")
-			time.Sleep(DelayClientStart)
+			time.Sleep(3 * time.Second)
 		}
 	}()
 

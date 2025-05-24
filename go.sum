@@ -43,6 +43,8 @@ github.com/yago-123/wg-punch v0.0.0-20250424161905-0c512b5441b8 h1:eRRNe9b4AygXq
 github.com/yago-123/wg-punch v0.0.0-20250424161905-0c512b5441b8/go.mod h1:Tc06EixDDqDDc19sg7Zd8btx9ydpKTR2QusB5BhrpWg=
 github.com/yago-123/wg-punch v0.0.0-20250507151749-7066c3b276d4 h1:y7wPzlfxpm0+RYev3AGqfL7xKMUJ+duZEYyEphhu1jo=
 github.com/yago-123/wg-punch v0.0.0-20250507151749-7066c3b276d4/go.mod h1:bfTux2p+uOAQYjYY1EtJ36QwUxx6ZNpysiC+Ar+zue8=
+github.com/yago-123/wg-punch v0.0.0-20250513132117-441fec6630aa h1:34zom7AzQbC8wswOXL2okcMZtPjeObUesrucRtIH3t4=
+github.com/yago-123/wg-punch v0.0.0-20250513132117-441fec6630aa/go.mod h1:bfTux2p+uOAQYjYY1EtJ36QwUxx6ZNpysiC+Ar+zue8=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.0.0-20210921155107-089bfa567519/go.mod h1:GvvjBRRGRdwPK5ydBHafDWAxML/pGHZbMvKqRZ5+Abc=

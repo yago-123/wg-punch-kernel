@@ -12,7 +12,7 @@ import (
 	"github.com/yago-123/wg-punch/cmd/common"
 	"github.com/yago-123/wg-punch/pkg/connect"
 	"github.com/yago-123/wg-punch/pkg/puncher"
-	"github.com/yago-123/wg-punch/pkg/wg"
+	"github.com/yago-123/wg-punch/pkg/tunnel"
 
 	"github.com/go-logr/logr"
 )
@@ -25,8 +25,8 @@ const (
 	TunnelHandshakeTimeout = 30 * time.Second
 	RendezvousServer       = "http://rendezvous.yago.ninja:7777"
 
-	LocalPeerID  = "o1"
-	RemotePeerID = "o2"
+	LocalPeerID  = "xc1"
+	RemotePeerID = "xc2"
 
 	WGLocalListenPort    = 51821
 	WGLocalIfaceName     = "wg1"
@@ -77,7 +77,7 @@ func main() {
 	ctxHandshake, cancel := context.WithTimeout(context.Background(), TunnelHandshakeTimeout)
 	defer cancel()
 
-	tunnelCfg := &wg.TunnelConfig{
+	tunnelCfg := &tunnel.Config{
 		PrivKey:           WGLocalPrivKey,
 		Iface:             WGLocalIfaceName,
 		IfaceIPv4CIDR:     WGLocalIfaceAddrCIDR,
@@ -88,11 +88,15 @@ func main() {
 	}
 
 	// Initialize WireGuard interface using WireGuard
-	tunnel, err := kernelwg.NewTunnel(tunnelCfg)
+	tunnel, err := kernelwg.NewTunnel(tunnelCfg, logger)
 	if err != nil {
 		logger.Error(err, "failed to create tunnel", "localPeer", LocalPeerID)
 		return
 	}
+
+	// the tunnel is started inside the Connect method, but can't be stopped by this method because the lifecycle
+	// must live outside of the Connect method. The tunnel stop responsibility must be handled manually
+	defer tunnel.Stop(context.Background())
 
 	// Connect to peer using a shared peer ID (both sides use same ID)
 	netConn, err := conn.Connect(ctxHandshake, tunnel, []string{WGLocalIfaceAddrCIDR}, RemotePeerID)
@@ -101,8 +105,6 @@ func main() {
 		return
 	}
 
-	// todo(): think about where to put the cancel of the tunnel itself
-	defer tunnel.Stop()
 	defer netConn.Close()
 
 	logger.Info("Tunnel has been stablished! Press Ctrl+C to exit.")
