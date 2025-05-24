@@ -24,7 +24,7 @@ const (
 	HandshakeTriggerMsg = "hello wg"
 
 	HandshakeTriggerLoopInterval = 300 * time.Millisecond
-	HandshakeCheckInterval       = 500 * time.Second
+	HandshakeCheckInterval       = 500 * time.Millisecond
 )
 
 type kernelWGTunnel struct {

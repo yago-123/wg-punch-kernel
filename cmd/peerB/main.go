@@ -26,8 +26,8 @@ const (
 	TunnelHandshakeTimeout = 30 * time.Second
 	RendezvousServer       = "http://rendezvous.yago.ninja:7777"
 
-	LocalPeerID  = "xc2"
-	RemotePeerID = "xc1"
+	LocalPeerID  = "xccccc2"
+	RemotePeerID = "xccccc1"
 
 	WGLocalListenPort    = 51822
 	WGLocalIfaceName     = "wg2"
