@@ -3,7 +3,7 @@ module github.com/yago-123/wg-punch-kernel
 go 1.24.2
 
 require (
-	github.com/go-logr/logr v1.4.2
+	github.com/go-logr/logr v1.4.3
 	github.com/vishvananda/netlink v1.3.0
 	github.com/yago-123/wg-punch v0.0.0-20250513132117-441fec6630aa
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
